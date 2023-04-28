@@ -447,6 +447,9 @@ public class AlgoCompare extends AlgoElement {
                         retval += inpWithExponent(0) + " = " + result + " " + Unicode.CENTER_DOT
                                 + " " + inpWithExponent(1);
                     }
+                    if (retval.contains("ERROR")) {
+                        retval = "";
+                    }
                     outputText.setTextString(retval);
                     debugElapsedTime();
                     if (!useRealGeom) {
@@ -478,6 +481,12 @@ public class AlgoCompare extends AlgoElement {
                     Compute.euclideanSolverExplore(kernel, lr_var[0], lr_var[1], paramLookup(rgs, "ineqs"),
                             paramLookup(rgs, "polys"), paramLookup(rgs, "triangles"),
                             paramLookup(rgs, "vars"), paramLookup(rgs, "posvariables"));
+            if (rgResult.contains("ERROR")) {
+                retval = "";
+                debugElapsedTime();
+                outputText.setTextString(retval);
+                return;
+            }
         }
 
         rgResult = as.rewriteResult(rgResult);

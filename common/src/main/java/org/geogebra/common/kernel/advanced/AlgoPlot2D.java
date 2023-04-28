@@ -22,6 +22,7 @@ import org.geogebra.common.kernel.arithmetic.FunctionNVar;
 import org.geogebra.common.kernel.arithmetic.FunctionVariable;
 import org.geogebra.common.kernel.arithmetic.FunctionalNVar;
 import org.geogebra.common.kernel.arithmetic.Inequality;
+import org.geogebra.common.kernel.cas.UsesCAS;
 import org.geogebra.common.kernel.commands.Commands;
 import org.geogebra.common.kernel.geos.GeoConic;
 import org.geogebra.common.kernel.geos.GeoElement;
@@ -40,7 +41,7 @@ import org.geogebra.common.util.debug.Log;
  * Adapted from AlgoPerimeterPoly
  */
 
-public class AlgoPlot2D extends AlgoElement {
+public class AlgoPlot2D extends AlgoElement implements UsesCAS {
 
 	private GeoElement inp;
 	private GeoElement outp;
@@ -54,13 +55,14 @@ public class AlgoPlot2D extends AlgoElement {
 	 *            the function to be plotted (via an external plotter)
 	 */
 
-	public AlgoPlot2D(Construction cons, GeoElement function) {
+	public AlgoPlot2D(Construction cons, String label, GeoElement function) {
 		super(cons);
 
 		this.inp = function;
 
 		compute_init();
 		setInputOutput();
+		outp.setLabel(label); // don't forget this -- in that case no GeoElement will be saved
 
 	}
 

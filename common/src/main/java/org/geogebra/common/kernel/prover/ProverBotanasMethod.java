@@ -365,7 +365,7 @@ public class ProverBotanasMethod {
 
 		private boolean disallowFixSecondPoint = false;
 
-		private String polys, elimVars, freeVars, freeVarsWithoutAlmostFree, elimVarsWithAlmostFree;
+		private String polys, elimVars, freeVars, freeVarsWithAlmostFree, freeVarsWithoutAlmostFree, elimVarsWithAlmostFree;
 		private String rgVars; // all variables that are required for real geometry
 		private PPolynomial[] thesisFactors;
 		private TreeMap<GeoElement, PPolynomial[]> geoPolys = new TreeMap<>();
@@ -528,6 +528,10 @@ public class ProverBotanasMethod {
 			return freeVarsWithoutAlmostFree;
 		}
 
+		public String getFreeVarsWithAlmostFree() {
+			return freeVarsWithAlmostFree;
+		}
+
 		/**
 		 * Return all variables for the RG subsystem. Use
 		 * computeStrings() before using this method.
@@ -676,11 +680,15 @@ public class ProverBotanasMethod {
 		public void computeStrings() {
 			TreeSet<PVariable> dependentVariables = new TreeSet<>();
 			TreeSet<PVariable> dependentVariablesWithAlmostFree = new TreeSet<>();
+			TreeSet<PVariable> freeVariablesWithAlmostFree = new TreeSet<>();
+			TreeSet<PVariable> freeVariablesWithoutAlmostFree = new TreeSet<>();
+			freeVariablesWithAlmostFree.addAll(freeVariables);
 
 			PPolynomial[] eqSystem = this.getPolynomials()
 					.toArray(new PPolynomial[this.getPolynomials().size()]);
-			TreeSet<PVariable> variables = new TreeSet<>(
-					PPolynomial.getVars(eqSystem));
+			TreeSet<PVariable> variables = new TreeSet<>();
+			variables.addAll(freeVariables);
+			variables.addAll(PPolynomial.getVars(eqSystem));
 
 			Iterator<PVariable> variablesIterator = variables.iterator();
 			while (variablesIterator.hasNext()) {
@@ -691,6 +699,12 @@ public class ProverBotanasMethod {
 				}
 				if (almostFreeVariables.contains(variable)) {
 					dependentVariablesWithAlmostFree.add(variable);
+				}
+				if (freeVariables.contains(variable) && !almostFreeVariables.contains(variable)) {
+					freeVariablesWithoutAlmostFree.add(variable);
+				}
+				if (freeVariables.contains(variable) && almostFreeVariables.contains(variable)) {
+					freeVariablesWithAlmostFree.add(variable);
 				}
 			}
 
@@ -718,8 +732,12 @@ public class ProverBotanasMethod {
 					eqSystemSubstituted, null, true, freeVariables);
 			this.elimVarsWithAlmostFree = PPolynomial.getVarsAsCommaSeparatedString(
 					eqSystemSubstituted, null, true, dependentVariablesWithAlmostFree);
+			// this.freeVarsWithoutAlmostFree = PPolynomial.getVarsAsCommaSeparatedString(
+			// 		eqSystemSubstituted, null, false, dependentVariablesWithAlmostFree);
 			this.freeVarsWithoutAlmostFree = PPolynomial.getVarsAsCommaSeparatedString(
-					eqSystemSubstituted, null, false, dependentVariablesWithAlmostFree);
+					eqSystemSubstituted, null, true, freeVariablesWithoutAlmostFree);
+			this.freeVarsWithAlmostFree = PPolynomial.getVarsAsCommaSeparatedString(
+					eqSystemSubstituted, null, true, freeVariablesWithAlmostFree);
 
 			/* Construct the needed variables for the real algebraic geometry subsystem. */
 			this.rgVars = freeVarsWithoutAlmostFree;
@@ -1844,8 +1862,23 @@ public class ProverBotanasMethod {
 				rgResult = realgeomWS.directCommand(rgCommand, rgParameters.toString());
 			} else {
 				String[] rgs = rgParameters.toString().split("&");
-				// FIXME: Set 4 to the correct value.
-				rgResult = Compute.euclideanSolverProve(geoStatement.kernel, 4, paramLookup(rgs, "ineq"),
+				Log.debug("maxFixcoords = " + maxFixcoords);
+				if (maxFixcoords == -1) {
+					maxFixcoords = 4;
+				}
+				if (maxFixcoords == 4) {
+					NDGCondition ndgc = new NDGCondition();
+					ndgc.setCondition("AreEqual");
+					GeoElement[] geos = new GeoElement[2];
+					int i = 0;
+					List<GeoElement> fp = getFreePoints(geoStatement);
+					geos[0] = fp.get(0);
+					geos[1] = fp.get(1);
+					ndgc.setGeos(geos);
+					Arrays.sort(ndgc.getGeos());
+					geoProver.addNDGcondition(ndgc);
+				}
+				rgResult = Compute.euclideanSolverProve(geoStatement.kernel, maxFixcoords, paramLookup(rgs, "ineq"),
 								paramLookup(rgs, "ineqs"), paramLookup(rgs, "polys"),
 								paramLookup(rgs, "triangles"), paramLookup(rgs, "vars"),
 						paramLookup(rgs, "posvariables"), freeVars);
@@ -1878,6 +1911,14 @@ public class ProverBotanasMethod {
 				return;
 			}
 
+			if (!rgResult.contains(" /\\ ") && rgResult.contains(" /= ")) {
+				// If the result is a disjunction of certain operations, and at least a NOT-EQUAL appears, return false.
+				// In this case the statement is true under some condition which contains a conjunction
+				// of an EQUAL operation which has a lower dimension as the variable space.
+				result = ProofResult.FALSE;
+				return;
+			}
+
 			// We could process the output here, maybe the conditions can be read off somehow... TODO
 
 			// In general it is difficult to tell if the negation of the result is "small enough".
@@ -1894,10 +1935,11 @@ public class ProverBotanasMethod {
 				return;
 			}
 
-			// Here we use the fact that the are not inequality assumptions.
+			// Here we use the fact that there are no inequality assumptions.
+			// 1. round, only negation.
 			String rgResultP = geoStatement.getKernel().getApplication().tarski.evalCached("(t-neg [" + rgResult + "])");
 			rgResultP = Compute.getTarskiOutput(rgResultP);
-			// Log.debug("resultP=" + rgResultP);
+			Log.debug("resultP=" + rgResultP);
 			// A special case: If there is no conjunction and there is at least one inequality (<, <=, >, >=, /=)
 			// in the "positive" result, then the statement holds in a "large enough" set:
 			if (!(rgResultP.contains(" /\\ ")) && (rgResultP.contains(" > ") || rgResultP.contains(" < ")
@@ -1906,7 +1948,32 @@ public class ProverBotanasMethod {
 				result = ProofResult.TRUE_ON_COMPONENTS;
 				return;
 			}
+			// Another special case: If there is no disjunction and there is at least one inequality (<, <=, >, >=, /=)
+			// in the "positive" result, then the statement holds in a "large enough" set:
+			if (!(rgResultP.contains(" \\/ ")) && (rgResultP.contains(" > ") || rgResultP.contains(" < ")
+					|| rgResultP.contains(" >= ") || rgResultP.contains(" <= ") || rgResultP.contains(" /= "))) {
+				// e.g. v5 >= 0 /\ v5 - 1 <= 0
+				result = ProofResult.TRUE_ON_COMPONENTS;
+				return;
+			}
+			// 2. round, simplifying the negation.
+			// Maybe we can simplify the formula... In fact, in some cases this will not simplify
+			// things, either... :-( TODO in Tarski/QEPCAD.
+			// Note that qepcad-api-call can be expensive when there are more variables.
+			String rgResultP2 = geoStatement.getKernel().getApplication().tarski.evalCached("(qepcad-api-call [" + rgResultP + "])");
+			Log.debug("resultP2=" + rgResultP2);
+			if (!(rgResultP2.contains(" /\\ ")) && (rgResultP2.contains(" > ") || rgResultP2.contains(" < ")
+					|| rgResultP2.contains(" >= ") || rgResultP2.contains(" <= ") || rgResultP2.contains(" /= "))) {
+				result = ProofResult.TRUE_ON_COMPONENTS;
+				return;
+			}
+			if (!(rgResultP2.contains(" \\/ ")) && (rgResultP2.contains(" > ") || rgResultP2.contains(" < ")
+					|| rgResultP2.contains(" >= ") || rgResultP2.contains(" <= ") || rgResultP2.contains(" /= "))) {
+				result = ProofResult.TRUE_ON_COMPONENTS;
+				return;
+			}
 
+			// No idea what this formula means. Stay on the safe side and say nothing...
 			result = ProofResult.UNKNOWN;
 		}
 
@@ -1927,12 +1994,6 @@ public class ProverBotanasMethod {
 
 		private PPolynomial[][] getExpressionStatements(GeoElement geoStatement) {
 			PPolynomial[][] statements;
-
-			/*
-			 * Disallow fixing the second point. This is crucial, otherwise false theorems
-			 * like Segment[A,B]==1 will be proven.
-			 */
-			maxFixcoords = 2;
 
 			AlgoElement algo = geoStatement.getParentAlgorithm();
 			/*
@@ -2000,6 +2061,14 @@ public class ProverBotanasMethod {
 					return null;
 				}
 			}
+
+			/*
+			 * Disallow fixing the second point. This is crucial, otherwise false theorems
+			 * like Segment[A,B]==1 will be proven.
+			 */
+			maxFixcoords = 2;
+			// We set this here and not before.
+			// Otherwise the inequalities will be too difficult to solve.
 
 			try {
 				/* K: extended polynomial */
